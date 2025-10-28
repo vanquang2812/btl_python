@@ -58,6 +58,12 @@
         color: white;
         border-color: #0ea5e9;
     }
+    /* THAY ĐỔI: Thêm class để date picker nhỏ hơn */
+    input[type="date"].small {
+        font-size: 0.85rem;
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
   </style>
 </head>
 <body class="h-full p-4 md:p-6">
@@ -188,7 +194,7 @@
 
     <div id="tabContentStats" class="tab-content">
         <section class="card rounded-lg p-5 shadow-sm">
-            <div class="flex flex-wrap justify-between items-center mb-4">
+            <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
                 <h2 class="font-semibold text-slate-700">Thống kê Quét</h2>
                 <div class="flex gap-2" id="statsFilterButtons">
                     <button class="stat-filter-btn active" data-days="7">7 Ngày qua</button>
@@ -197,6 +203,17 @@
                 </div>
             </div>
 
+            <div class="flex flex-wrap gap-4 items-end mb-4 pb-4 border-b border-slate-200">
+                <div>
+                    <label for="statsStartDate" class="small text-slate-600 block mb-1">Từ ngày</label>
+                    <input type="date" id="statsStartDate" class="p-2 rounded border border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 small">
+                </div>
+                <div>
+                    <label for="statsEndDate" class="small text-slate-600 block mb-1">Đến ngày</label>
+                    <input type="date" id="statsEndDate" class="p-2 rounded border border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 small">
+                </div>
+                <button id="statsFilterBtn" class="p-2 bg-sky-500 text-white rounded hover:bg-sky-600 transition-colors">Lọc</button>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div class="p-4 rounded border border-slate-200 text-center">
                     <div class="text-sm text-slate-500">Tổng số lần quét</div>
@@ -259,6 +276,7 @@
       </div>
     </div>
   </div>
+
   <div id="toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-800 text-white py-2 px-5 rounded-lg shadow-xl transition-opacity duration-500 z-50"></div>
 
 <script>
@@ -268,7 +286,6 @@
   let selectedHistoryRecord = null;
   const wsPath = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/scan`;
 
-  // Biến cho các biểu đồ (MỚI)
   let charts = {
       topPorts: null,
       topTargets: null,
@@ -314,10 +331,13 @@
     modalExportJsonBtn: document.getElementById('modalExportJsonBtn'),
     modalExportCsvBtn: document.getElementById('modalExportCsvBtn'),
 
-    // Stats Tab Elements (MỚI)
+    // Stats Tab Elements
     tabBtnStats: document.getElementById('tabBtnStats'),
     tabContentStats: document.getElementById('tabContentStats'),
     statsFilterButtons: document.getElementById('statsFilterButtons'),
+    statsStartDate: document.getElementById('statsStartDate'),
+    statsEndDate: document.getElementById('statsEndDate'),
+    statsFilterBtn: document.getElementById('statsFilterBtn'),
     statTotalScans: document.getElementById('statTotalScans'),
     statUniqueTargets: document.getElementById('statUniqueTargets'),
     statTotalOpenPorts: document.getElementById('statTotalOpenPorts'),
@@ -339,9 +359,12 @@
   const formatElapsed = ts => { const s = Math.floor(Date.now()/1000 - ts); return s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`; };
 
   const escapeHTML = (str) => {
+      // Allow null/undefined to pass through, handle non-strings gracefully
+      if (str == null) return '';
       if (typeof str !== 'string') return String(str);
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
+
 
   const cleanBannerText = (text) => {
      if (typeof text !== 'string') return text;
@@ -363,29 +386,28 @@
       URL.revokeObjectURL(url);
   };
 
-  // HÀM CHUYỂN TAB TỪ FILE THAM KHẢO
+  // HÀM CHUYỂN TAB
   window.switchTab = (tabId) => {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
     document.getElementById(`tabContent${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`).classList.add('active');
     document.getElementById(`tabBtn${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`).classList.add('active');
 
-    // Cập nhật: Gọi hàm tương ứng
     if (tabId === 'history') {
       loadHistory();
     } else if (tabId === 'stats') {
-      loadStats(); // (MỚI)
+      loadStats();
     }
   }
 
   // ========================================================
-  // CÁC HÀM THỐNG KÊ (MỚI)
+  // CÁC HÀM THỐNG KÊ
   // ========================================================
 
   // Hàm tải dữ liệu (chung cho cả History và Stats)
   const fetchHistoryData = async () => {
-      if (allHistoryData.length > 0) return true; // Đã có cache
-
+      // Luôn fetch lại để đảm bảo dữ liệu mới nhất
+      allHistoryData = []; // Xóa cache
       addLog('Đang tải lịch sử quét...');
       try {
           const response = await fetch(`/results/summary.jsonl?t=${new Date().getTime()}`);
@@ -411,7 +433,7 @@
       }
   };
 
-  // Hàm lọc dữ liệu theo số ngày
+  // Hàm lọc dữ liệu theo số ngày (cho nút nhanh)
   const filterDataByDays = (days) => {
       const now = new Date();
       const cutoff = new Date();
@@ -422,11 +444,25 @@
       return allHistoryData.filter(record => record.ts >= cutoffTs);
   };
 
+  // HÀM BỎ CHỌN NÚT LỌC NHANH
+  const deselectQuickFilters = () => {
+      els.statsFilterButtons.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+  };
+
   // Hàm render Thống kê
   const loadStats = async () => {
       els.statsLoading.classList.remove('hidden');
       els.statsEmpty.classList.add('hidden');
       els.statsChartsContainer.classList.add('hidden');
+      // Reset các số tổng quan ngay từ đầu
+      els.statTotalScans.textContent = '0';
+      els.statUniqueTargets.textContent = '0';
+      els.statTotalOpenPorts.textContent = '0';
+      els.statTotalVulns.textContent = '0';
+
+      // Hủy các biểu đồ cũ nếu có
+      Object.values(charts).forEach(chart => chart?.destroy());
+
 
       const dataLoaded = await fetchHistoryData();
       if (dataLoaded !== true) {
@@ -436,14 +472,41 @@
           return;
       }
 
-      const activeFilter = els.statsFilterButtons.querySelector('.active');
-      const days = parseInt(activeFilter.dataset.days, 10);
-      const filteredData = filterDataByDays(days);
+      const startStr = els.statsStartDate.value;
+      const endStr = els.statsEndDate.value;
+      let filteredData;
+
+      if (startStr || endStr) {
+          // LỌC THEO NGÀY TÙY CHỈNH
+          deselectQuickFilters();
+          let startDate = startStr ? new Date(startStr) : null;
+          let endDate = endStr ? new Date(endStr) : null;
+
+          if (startDate) startDate.setHours(0, 0, 0, 0);
+          if (endDate) endDate.setHours(23, 59, 59, 999);
+
+          filteredData = allHistoryData.filter(record => {
+              const recordDate = new Date(record.ts * 1000);
+              if (startDate && recordDate < startDate) return false;
+              if (endDate && recordDate > endDate) return false;
+              return true;
+          });
+      } else {
+          // LỌC THEO NÚT NHANH (7, 30, All)
+          const activeFilter = els.statsFilterButtons.querySelector('.active') || els.statsFilterButtons.querySelector('[data-days="7"]');
+          if (!els.statsFilterButtons.querySelector('.active')) {
+              activeFilter.classList.add('active');
+          }
+          const days = parseInt(activeFilter.dataset.days, 10);
+          filteredData = filterDataByDays(days);
+      }
+
 
       els.statsLoading.classList.add('hidden');
       if (filteredData.length === 0) {
           els.statsEmpty.textContent = 'Không có dữ liệu để thống kê cho khoảng thời gian này.';
           els.statsEmpty.classList.remove('hidden');
+          // Số đã được reset ở đầu hàm
           return;
       }
 
@@ -452,20 +515,22 @@
       // 1. Render Dashboard
       const uniqueTargets = new Set(filteredData.map(r => r.target));
       const totalOpenPorts = filteredData.reduce((sum, r) => sum + (r.open_ports?.length || 0), 0);
+      // SỬA LỖI: Tính tổng số lỗ hổng thực tế
       const totalVulns = filteredData.reduce((sum, r) => sum + (r.vulnerabilities?.length || 0), 0);
+
 
       els.statTotalScans.textContent = filteredData.length;
       els.statUniqueTargets.textContent = uniqueTargets.size;
       els.statTotalOpenPorts.textContent = totalOpenPorts;
-      els.statTotalVulns.textContent = totalVulns;
+      els.statTotalVulns.textContent = totalVulns; // Hiển thị tổng số thực tế
 
       // 2. Render Biểu đồ
       renderStatsChart('topPorts', 'statsTopPortsChart', filteredData, getTopOpenPortsData, 'bar', 'Top Cổng Mở');
       renderStatsChart('topTargets', 'statsTopTargetsChart', filteredData, getTopTargetsData, 'bar', 'Top Mục tiêu', { indexAxis: 'y' });
-      renderStatsChart('topVulns', 'statsTopVulnsChart', filteredData, getTopVulnsData, 'bar', 'Top Lỗ hổng');
+      renderStatsChart('topVulns', 'statsTopVulnsChart', filteredData, getTopVulnsData, 'bar', 'Top Lỗ hổng'); // Sửa ở hàm getTopVulnsData
       renderStatsChart('scanActivity', 'statsScanActivityChart', filteredData, getScanActivityData, 'line', 'Hoạt động Quét', {
           scales: {
-              x: { type: 'time', time: { unit: 'day' } }
+              x: { type: 'time', time: { unit: 'day', tooltipFormat: 'dd/MM/yyyy' }, title: { display: true, text: 'Ngày' } }
           }
       });
   };
@@ -474,9 +539,10 @@
   const renderStatsChart = (chartKey, canvasId, data, dataFunc, type, label, extraOptions = {}) => {
       const { labels, values } = dataFunc(data);
 
-      if (charts[chartKey]) {
-          charts[chartKey].destroy();
-      }
+      // Đã hủy ở đầu hàm loadStats
+      // if (charts[chartKey]) {
+      //     charts[chartKey].destroy();
+      // }
 
       charts[chartKey] = new Chart(document.getElementById(canvasId).getContext('2d'), {
           type: type,
@@ -521,16 +587,21 @@
       return { labels: sorted.map(e => e[0]), values: sorted.map(e => e[1]) };
   };
 
+  // SỬA LỖI: Cập nhật hàm getTopVulnsData để đếm theo script_id + port
   const getTopVulnsData = (data) => {
-      const counts = {};
+      const counts = {}; // Key: "script_id (port)", Value: count
       data.forEach(r => {
           r.vulnerabilities?.forEach(vuln => {
-              counts[vuln.script_id] = (counts[vuln.script_id] || 0) + 1;
+              // Tạo key kết hợp
+              const key = `${vuln.script_id} (${vuln.port})`;
+              counts[key] = (counts[key] || 0) + 1;
           });
       });
+      // Sắp xếp và lấy top 10
       const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
       return { labels: sorted.map(e => e[0]), values: sorted.map(e => e[1]) };
   };
+
 
   const getScanActivityData = (data) => {
       const counts = {}; // Key: 'YYYY-MM-DD', Value: count
@@ -547,12 +618,27 @@
       if (e.target.tagName === 'BUTTON') {
           els.statsFilterButtons.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
           e.target.classList.add('active');
+
+          // Xóa ngày tùy chỉnh
+          els.statsStartDate.value = '';
+          els.statsEndDate.value = '';
+
+          allHistoryData = []; // Xóa cache để fetch lại
           loadStats();
       }
   });
 
+  // GÁN SỰ KIỆN MỚI CHO BỘ LỌC TÙY CHỈNH
+  els.statsFilterBtn.addEventListener('click', () => {
+      allHistoryData = []; // Xóa cache để fetch lại
+      loadStats();
+  });
+  els.statsStartDate.addEventListener('change', deselectQuickFilters);
+  els.statsEndDate.addEventListener('change', deselectQuickFilters);
+
+
   // ========================================================
-  // HÀM LỊCH SỬ (ĐÃ CẬP NHẬT)
+  // HÀM LỊCH SỬ
   // ========================================================
   const loadHistory = async () => {
     els.historyLoading.classList.remove('hidden');
@@ -567,7 +653,6 @@
         return;
     }
 
-    // Lấy giá trị bộ lọc
     const startStr = els.startDate.value;
     const endStr = els.endDate.value;
     let startDate = null;
@@ -582,7 +667,6 @@
         endDate.setHours(23, 59, 59, 999);
     }
 
-    // Lọc dữ liệu
     const filteredData = allHistoryData.filter(record => {
         const recordDate = new Date(record.ts * 1000);
         if (startDate && recordDate < startDate) return false;
@@ -590,7 +674,6 @@
         return true;
     });
 
-    // Render dữ liệu
     els.historyLoading.classList.add('hidden');
     if (filteredData.length === 0) {
         els.historyEmpty.classList.remove('hidden');
@@ -611,11 +694,31 @@
             let otherPorts = [...(record.filtered_ports || []), ...(record.unfiltered_ports || []), ...(record.open_filtered_ports || [])].join(', ');
             otherPorts = escapeHTML(otherPorts || '-');
 
-            let vulnError = '-';
+            let vulnErrorHtml = '-';
             if (record.error) {
-                vulnError = `<span class="text-red-600">Lỗi: ${escapeHTML(record.error)}</span>`;
+                vulnErrorHtml = `<span class="text-red-600">Lỗi: ${escapeHTML(record.error)}</span>`;
             } else if (record.vulnerabilities && record.vulnerabilities.length > 0) {
-                vulnError = `Lỗ hổng: ${record.vulnerabilities.length}`;
+                vulnErrorHtml = '<div class="space-y-1">';
+                record.vulnerabilities.forEach(v => {
+                    const scriptId = escapeHTML(v.script_id);
+                    const port = escapeHTML(v.port);
+                    const service = escapeHTML(v.service || 'unknown');
+                    const outputContent = escapeHTML(v.output); // Hiển thị toàn bộ
+
+                    let titleColor = 'text-yellow-700';
+                     if (v.output?.toLowerCase().includes('vulnerable') || v.output?.toLowerCase().includes('exploit')) {
+                        titleColor = 'text-red-700';
+                    }
+
+                    vulnErrorHtml += `
+                        <div class="p-1 border-l-2 border-slate-200 pl-2">
+                            <div class="font-bold ${titleColor} small">${scriptId} (${port})</div>
+                            <div class="mono text-xs text-slate-500">${service}</div>
+                            ${outputContent ? `<pre class="mono text-xs text-slate-600 mt-1">${outputContent}</pre>` : ''}
+                        </div>
+                    `;
+                });
+                vulnErrorHtml += '</div>';
             }
 
             let bannersHtml = '-';
@@ -623,6 +726,7 @@
                 bannersHtml = Object.entries(record.banners)
                     .map(([port, banner]) => {
                         const cleanedBanner = cleanBannerText(banner);
+                        // Hiển thị toàn bộ banner
                         return `<div><strong>${escapeHTML(port)}:</strong> ${escapeHTML(cleanedBanner)}</div>`;
                     })
                     .join('');
@@ -634,7 +738,7 @@
               <td class="p-2 align-top break-all">${openPorts}</td>
               <td class="p-2 align-top break-all">${closedPorts}</td>
               <td class="p-2 align-top break-all">${otherPorts}</td>
-              <td class="p-2 align-top break-all">${vulnError}</td>
+              <td class="p-2 align-top break-words">${vulnErrorHtml}</td>
               <td class="p-2 align-top history-banner">${bannersHtml}</td>
             `;
             els.historyBody.appendChild(tr);
@@ -642,15 +746,14 @@
     }
   };
 
-  // GẮN SỰ KIỆN LỌC
   els.filterHistoryBtn.addEventListener('click', () => {
-      allHistoryData = []; // Xóa cache để lọc
+      allHistoryData = [];
       loadHistory();
   });
   els.clearFilterBtn.addEventListener('click', () => {
       els.startDate.value = '';
       els.endDate.value = '';
-      allHistoryData = []; // Xóa cache để tải lại
+      allHistoryData = [];
       loadHistory();
   });
 
@@ -684,9 +787,16 @@
     if (!selectedHistoryRecord) return;
     const r = selectedHistoryRecord;
 
-    const header = ['target', 'timestamp', 'open_ports', 'closed_ports', 'filtered_ports', 'other_ports', 'error', 'vulnerabilities_count'];
+    const header = ['target', 'timestamp', 'open_ports', 'closed_ports', 'filtered_ports', 'other_ports', 'error', 'vulnerabilities_details'];
 
     const otherPorts = [...(r.unfiltered_ports || []), ...(r.open_filtered_ports || [])].join(';');
+
+    let vulnerabilitiesDetails = '';
+    if (r.vulnerabilities && r.vulnerabilities.length > 0) {
+        vulnerabilitiesDetails = r.vulnerabilities.map(v => {
+            return `${v.script_id}(${v.port}|${v.service || ''})`;
+        }).join('; ');
+    }
 
     const row = [
       r.target,
@@ -696,7 +806,7 @@
       r.filtered_ports?.join(';') || '',
       otherPorts,
       r.error || '',
-      r.vulnerabilities?.length || 0
+      vulnerabilitiesDetails
     ];
 
     const csv = [header, row].map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -704,6 +814,7 @@
     exportData(csv, 'text/csv', filename);
     closeHistoryModal();
   };
+
 
   els.closeModalBtn.addEventListener('click', closeHistoryModal);
   els.historyExportModal.addEventListener('click', (e) => {
@@ -857,7 +968,6 @@
     if (els.tabContentHistory.classList.contains('active')) {
          setTimeout(loadHistory, 1000);
     }
-    // Cập nhật: Tải lại stats nếu tab stats đang mở
     if (els.tabContentStats.classList.contains('active')) {
          setTimeout(loadStats, 1000);
     }
